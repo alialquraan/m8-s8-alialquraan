@@ -8,6 +8,7 @@ types and dispatches it to a different retrieval pipeline:
 """
 
 from __future__ import annotations
+import re
 
 import weaviate
 
@@ -29,7 +30,48 @@ def classify_query(query: str) -> str:
       centroid in embedding space.
     """
     # TODO: implement either rule-based or embedding-based classifier
-    raise NotImplementedError("classify_query is not yet implemented")
+    query = query.strip()
+    q = query.lower()
+
+    words = query.split()
+
+    # Factoid indicators
+    has_digits = bool(re.search(r"\d", query))
+    has_quotes = '"' in query or "'" in query
+
+    # Capitalized multi-word phrase (named entity heuristic)
+    has_named_entity = bool(
+        re.search(r"\b[A-Z][a-z]+\s+[A-Z][a-z]+\b", query)
+    )
+
+    if has_digits or has_quotes or has_named_entity:
+        return "factoid"
+
+    if len(words) <= 4:
+        return "factoid"
+
+    semantic_keywords = [
+        "explain",
+        "describe",
+        "difference",
+        "compare",
+        "meaning",
+        "concept",
+        "relationship",
+        "advantages",
+        "benefits",
+        "similar",
+        "how",
+        "why",
+    ]
+
+    if any(keyword in q for keyword in semantic_keywords):
+        return "semantic"
+
+    if len(words) >= 8:
+        return "semantic"
+
+    return "mixed"
 
 
 def routed_search(client: weaviate.Client, query: str, k: int, embedder) -> list[str]:
@@ -42,4 +84,18 @@ def routed_search(client: weaviate.Client, query: str, k: int, embedder) -> list
     #         "factoid"  -> bm25_search(client, query, k)
     #         "semantic" -> dense_search(client, query, k, embedder)
     #         else       -> hybrid_search(client, query, k, embedder, alpha=0.5)
-    raise NotImplementedError("routed_search is not yet implemented")
+    kind = classify_query(query)
+
+    if kind == "factoid":
+        return bm25_search(client, query, k)
+
+    if kind == "semantic":
+        return dense_search(client, query, k, embedder)
+
+    return hybrid_search(
+        client,
+        query,
+        k,
+        embedder,
+        alpha=0.5,
+    )
